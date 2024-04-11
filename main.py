@@ -3,6 +3,16 @@ import os
 from dotenv import load_dotenv
 import telebot
 import psycopg2
+from langchain.schema import HumanMessage, SystemMessage
+from langchain.chat_models.gigachat import GigaChat
+
+chat = GigaChat(credentials=os.environ['GIGACHAT_TOKEN'], verify_ssl_certs=False)
+
+messages = [
+    SystemMessage(
+        content="Ты чат-бот для крутых гидродинамиков Альберт"
+    )
+]
 
 load_dotenv()
 
@@ -34,7 +44,11 @@ def find_closest_match(user_question, chat_id):
             answer = next((row[1] for row in faq_data if row[0] == closest_match[0]), None)
             bot.send_message(chat_id, answer)
         else:
-            bot.send_message(chat_id, "Извините, я не могу найти ответ на ваш вопрос.")
+            messages.append(HumanMessage(content=user_question))
+            res = chat(messages)
+            messages.append(res)
+
+            bot.send_message(chat_id, res.content)
     except Exception as e:
         print(e)
         bot.send_message(chat_id, "Произошла ошибка при поиске ответа.")
