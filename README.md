@@ -37,7 +37,7 @@ DB_HOST=<хост базы данных>
 Затем примените дамп из репозитория [schema_dump.sql](https://github.com/Maksim339/fluid_dynamics_bot/blob/main/schema_dump.sql)
 
 
-```sudo -u postgres psql новая_база_данных < schema_dump.sql```
+```sudo -u postgres psql <имя вашей базы данных> < schema_dump.sql```
 
 ### Запуск бота
 
