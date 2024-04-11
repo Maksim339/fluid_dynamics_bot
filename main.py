@@ -11,9 +11,10 @@ import psycopg2
 import re
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.chat_models.gigachat import GigaChat
+from telebot.types import Message, CallbackQuery
 
 chat = GigaChat(
-    credentials='YTg1NjZmNzctNDdhMy00ZmVjLWI5NzQtMjIzNTE5YjdmMmVlOjhhNGVlY2U4LTIwYTgtNGMxMS1hMzVhLTFlZGQzNzExMjIxZQ==',
+    credentials=os.environ['GIGACHAT_TOKEN'],
     verify_ssl_certs=False)
 
 messages = [
@@ -24,12 +25,12 @@ messages = [
 
 load_dotenv()
 
-API_TOKEN = os.environ['BOT_TOKEN']
+API_TOKEN: str = os.environ['BOT_TOKEN']
 
-EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_ADDRESS: str = os.getenv('EMAIL_ADDRESS')
+EMAIL_PASSWORD: str = os.getenv('EMAIL_PASSWORD')
 
-DB_PARAMS = {
+DB_PARAMS: dict = {
     "dbname": os.environ['DB_NAME'],
     "user": os.environ['DB_USER'],
     "password": os.environ['DB_PASSWORD'],
@@ -40,8 +41,8 @@ bot = telebot.TeleBot(API_TOKEN)
 
 
 @bot.message_handler(commands=['del'])
-def delete_faq_start(message):
-    user_id = message.from_user.id
+def delete_faq_start(message: Message) -> None:
+    user_id: int = message.from_user.id
     if is_user_registered(user_id):
         msg = bot.send_message(message.chat.id, "Какой вопрос вы хотите удалить?")
         bot.register_next_step_handler(msg, find_question_to_delete, message.chat.id)
@@ -50,8 +51,8 @@ def delete_faq_start(message):
                          "Для использования этой команды необходимо зарегистрироваться. Используйте команду /register.")
 
 
-def find_question_to_delete(message, chat_id):
-    user_question = message.text
+def find_question_to_delete(message: Message, chat_id: int) -> None:
+    user_question: str = message.text
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -74,7 +75,7 @@ def find_question_to_delete(message, chat_id):
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
-def handle_delete_query(call):
+def handle_delete_query(call: CallbackQuery) -> None:
     if call.data.startswith("del_yes"):
         _, question = call.data.split("|", 1)
         delete_faq(question, call.message.chat.id)
@@ -82,7 +83,7 @@ def handle_delete_query(call):
         bot.send_message(call.message.chat.id, "Попробуйте указать другой вопрос для удаления или отмените операцию.")
 
 
-def delete_faq(question, chat_id):
+def delete_faq(question: str, chat_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -98,8 +99,8 @@ def delete_faq(question, chat_id):
 
 
 @bot.message_handler(commands=['edit'])
-def edit_faq_start(message):
-    user_id = message.from_user.id
+def edit_faq_start(message: Message) -> None:
+    user_id: int = message.from_user.id
     if is_user_registered(user_id):
         msg = bot.send_message(message.chat.id, "Какой вопрос вы хотите изменить?")
         bot.register_next_step_handler(msg, find_question_to_edit, message.chat.id)
@@ -108,8 +109,8 @@ def edit_faq_start(message):
                          "Для использования этой команды необходимо зарегистрироваться. Используйте команду /register.")
 
 
-def find_question_to_edit(message, chat_id):
-    user_question = message.text
+def find_question_to_edit(message: Message, chat_id: int) -> None:
+    user_question: str = message.text
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -132,7 +133,7 @@ def find_question_to_edit(message, chat_id):
 
 
 @bot.callback_query_handler(func=lambda call: True)
-def handle_query(call):
+def handle_query(call: CallbackQuery) -> None:
     if call.data.startswith("edit_yes"):
         _, question = call.data.split("|", 1)
         msg = bot.send_message(call.message.chat.id, "Введите новый ответ на вопрос:")
@@ -142,8 +143,8 @@ def handle_query(call):
         bot.register_next_step_handler(call.message, find_question_to_edit, call.message.chat.id)
 
 
-def update_faq(message, question):
-    new_answer = message.text
+def update_faq(message: Message, question: str) -> None:
+    new_answer: str = message.text
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -158,12 +159,12 @@ def update_faq(message, question):
         conn.close()
 
 
-def send_confirmation_email(email, code):
+def send_confirmation_email(email: str, code: int) -> None:
     msg = MIMEMultipart()
     msg['From'] = EMAIL_ADDRESS
     msg['To'] = email
     msg['Subject'] = 'Код подтверждения регистрации'
-    body = 'Ваш код подтверждения: {}'.format(code)
+    body = f'Ваш код подтверждения: {code}'
     msg.attach(MIMEText(body, 'plain'))
 
     server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -175,15 +176,15 @@ def send_confirmation_email(email, code):
 
 
 @bot.message_handler(commands=['register'])
-def request_email(message):
+def request_email(message: Message) -> None:
     msg = bot.send_message(message.chat.id, "Введите вашу почту (@contractor.gazprom-neft.ru или @gazprom-neft.ru):")
     bot.register_next_step_handler(msg, process_email_registration, message.from_user.id)
 
 
-def process_email_registration(message, user_id):
-    email = message.text.lower()
+def process_email_registration(message: Message, user_id: int) -> None:
+    email: str = message.text.lower()
     if re.match(r".+@(contractor\.gazprom-neft\.ru|gazprom-neft\.ru)$", email):
-        confirmation_code = random.randint(100000, 999999)
+        confirmation_code: int = random.randint(100000, 999999)
         send_confirmation_email(email, confirmation_code)
 
         conn = get_db_connection()
@@ -206,8 +207,8 @@ def process_email_registration(message, user_id):
                          "Почта должна быть на домене @contractor.gazprom-neft.ru или @gazprom-neft.ru.")
 
 
-def confirm_email_registration(message, user_id, expected_code):
-    entered_code = message.text
+def confirm_email_registration(message: Message, user_id: int, expected_code: int) -> None:
+    entered_code: str = message.text
     if str(expected_code) == entered_code:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -225,7 +226,7 @@ def confirm_email_registration(message, user_id, expected_code):
         bot.send_message(message.chat.id, "Код подтверждения неверен.")
 
 
-def is_user_registered(user_id):
+def is_user_registered(user_id: int) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -239,32 +240,11 @@ def is_user_registered(user_id):
         conn.close()
 
 
-@bot.message_handler(commands=['register'])
-def register_user(message):
-    user_id = message.from_user.id
-    if not is_user_registered(user_id):
-        conn = get_db_connection()
-        cur = conn.cursor()
-        try:
-            cur.execute("INSERT INTO registered_users (user_id, is_registered) VALUES (%s, TRUE)", (user_id,))
-            conn.commit()
-            bot.send_message(message.chat.id, "Вы успешно зарегистрированы.")
-        except Exception as e:
-            print(e)
-            bot.send_message(message.chat.id, "Произошла ошибка при регистрации.")
-        finally:
-            cur.close()
-            conn.close()
-    else:
-        bot.send_message(message.chat.id, "Вы уже зарегистрированы.")
+def get_db_connection() -> psycopg2.extensions.connection:
+    return psycopg2.connect(**DB_PARAMS)
 
 
-def get_db_connection():
-    conn = psycopg2.connect(**DB_PARAMS)
-    return conn
-
-
-def find_closest_match(user_question, chat_id):
+def find_closest_match(user_question: str, chat_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -289,7 +269,7 @@ def find_closest_match(user_question, chat_id):
 
 
 @bot.message_handler(commands=['start'])
-def start_message(message):
+def start_message(message: Message) -> None:
     bot.send_message(
         message.chat.id,
         "Привет! Я бот для гидродинамиков.\n"
@@ -298,12 +278,12 @@ def start_message(message):
     )
 
 
-pending_additions = {}
+pending_additions: dict = {}
 
 
 @bot.message_handler(commands=['train'])
-def add_faq_start(message):
-    user_id = message.from_user.id
+def add_faq_start(message: Message) -> None:
+    user_id: int = message.from_user.id
     if is_user_registered(user_id):
         msg = bot.send_message(message.chat.id, "Введите вопрос:")
         bot.register_next_step_handler(msg, add_question, message.chat.id)
@@ -313,27 +293,27 @@ def add_faq_start(message):
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
-def answer_question(message):
-    user_question = message.text
+def answer_question(message: Message) -> None:
+    user_question: str = message.text
     find_closest_match(user_question, message.chat.id)
 
 
-def add_question(message, chat_id):
-    question = message.text
+def add_question(message: Message, chat_id: int) -> None:
+    question: str = message.text
     pending_additions[chat_id] = {'question': question}
     msg = bot.send_message(chat_id, "Теперь введите ответ на вопрос:")
     bot.register_next_step_handler(msg, add_answer, chat_id)
 
 
-def add_answer(message, chat_id):
-    answer = message.text
+def add_answer(message: Message, chat_id: int) -> None:
+    answer: str = message.text
     if chat_id in pending_additions:
         pending_additions[chat_id]['answer'] = answer
         insert_faq(pending_additions[chat_id]['question'], answer, chat_id)
         del pending_additions[chat_id]
 
 
-def insert_faq(question, answer, chat_id):
+def insert_faq(question: str, answer: str, chat_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
