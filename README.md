@@ -28,6 +28,16 @@ DB_USER=<имя пользователя базы данных>
 DB_PASSWORD=<пароль базы данных>
 DB_HOST=<хост базы данных>
 ```
+### Настройка базы данных
+
+Для начала создайте базу данных PostgreSQL:
+
+```sudo -u postgres psql -c "CREATE DATABASE <имя вашей базы данных>;"```
+
+Затем примените дамп из репозитория [schema_dump.sql](https://github.com/Maksim339/fluid_dynamics_bot/blob/main/schema_dump.sql)
+
+
+```sudo -u postgres psql новая_база_данных < schema_dump.sql```
 
 ### Запуск бота
 
