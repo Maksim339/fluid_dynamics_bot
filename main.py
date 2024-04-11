@@ -1,12 +1,20 @@
 import difflib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import smtplib
+import random
 import os
 from dotenv import load_dotenv
 import telebot
+from telebot import types
 import psycopg2
+import re
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.chat_models.gigachat import GigaChat
 
-chat = GigaChat(credentials=os.environ['GIGACHAT_TOKEN'], verify_ssl_certs=False)
+chat = GigaChat(
+    credentials='YTg1NjZmNzctNDdhMy00ZmVjLWI5NzQtMjIzNTE5YjdmMmVlOjhhNGVlY2U4LTIwYTgtNGMxMS1hMzVhLTFlZGQzNzExMjIxZQ==',
+    verify_ssl_certs=False)
 
 messages = [
     SystemMessage(
@@ -17,6 +25,10 @@ messages = [
 load_dotenv()
 
 API_TOKEN = os.environ['BOT_TOKEN']
+
+EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+
 DB_PARAMS = {
     "dbname": os.environ['DB_NAME'],
     "user": os.environ['DB_USER'],
@@ -25,6 +37,226 @@ DB_PARAMS = {
 }
 
 bot = telebot.TeleBot(API_TOKEN)
+
+
+@bot.message_handler(commands=['del'])
+def delete_faq_start(message):
+    user_id = message.from_user.id
+    if is_user_registered(user_id):
+        msg = bot.send_message(message.chat.id, "Какой вопрос вы хотите удалить?")
+        bot.register_next_step_handler(msg, find_question_to_delete, message.chat.id)
+    else:
+        bot.send_message(message.chat.id,
+                         "Для использования этой команды необходимо зарегистрироваться. Используйте команду /register.")
+
+
+def find_question_to_delete(message, chat_id):
+    user_question = message.text
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT question FROM faq")
+        questions = [row[0] for row in cur.fetchall()]
+        closest_match = difflib.get_close_matches(user_question, questions, n=1, cutoff=0.6)
+        if closest_match:
+            markup = types.InlineKeyboardMarkup()
+            yes_button = types.InlineKeyboardButton("Да", callback_data=f"del_yes|{closest_match[0]}")
+            no_button = types.InlineKeyboardButton("Нет", callback_data="del_no")
+            markup.add(yes_button, no_button)
+            bot.send_message(chat_id, f"Вы хотите удалить этот вопрос: \"{closest_match[0]}\"?", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, "Похожий вопрос не найден. Попробуйте снова.")
+    except Exception as e:
+        print(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("del_"))
+def handle_delete_query(call):
+    if call.data.startswith("del_yes"):
+        _, question = call.data.split("|", 1)
+        delete_faq(question, call.message.chat.id)
+    elif call.data == "del_no":
+        bot.send_message(call.message.chat.id, "Попробуйте указать другой вопрос для удаления или отмените операцию.")
+
+
+def delete_faq(question, chat_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM faq WHERE question = %s", (question,))
+        conn.commit()
+        bot.send_message(chat_id, "Вопрос успешно удален из базы данных.")
+    except Exception as e:
+        print(e)
+        bot.send_message(chat_id, "Произошла ошибка при удалении вопроса.")
+    finally:
+        cur.close()
+        conn.close()
+
+
+@bot.message_handler(commands=['edit'])
+def edit_faq_start(message):
+    user_id = message.from_user.id
+    if is_user_registered(user_id):
+        msg = bot.send_message(message.chat.id, "Какой вопрос вы хотите изменить?")
+        bot.register_next_step_handler(msg, find_question_to_edit, message.chat.id)
+    else:
+        bot.send_message(message.chat.id,
+                         "Для использования этой команды необходимо зарегистрироваться. Используйте команду /register.")
+
+
+def find_question_to_edit(message, chat_id):
+    user_question = message.text
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT question FROM faq")
+        questions = [row[0] for row in cur.fetchall()]
+        closest_match = difflib.get_close_matches(user_question, questions, n=1, cutoff=0.6)
+        if closest_match:
+            markup = types.InlineKeyboardMarkup()
+            yes_button = types.InlineKeyboardButton("Да", callback_data=f"edit_yes|{closest_match[0]}")
+            no_button = types.InlineKeyboardButton("Нет", callback_data="edit_no")
+            markup.add(yes_button, no_button)
+            bot.send_message(chat_id, f"Вы хотите изменить этот вопрос: \"{closest_match[0]}\"?", reply_markup=markup)
+        else:
+            bot.send_message(chat_id, "Похожий вопрос не найден. Попробуйте снова.")
+    except Exception as e:
+        print(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    if call.data.startswith("edit_yes"):
+        _, question = call.data.split("|", 1)
+        msg = bot.send_message(call.message.chat.id, "Введите новый ответ на вопрос:")
+        bot.register_next_step_handler(msg, update_faq, question)
+    elif call.data == "edit_no":
+        bot.send_message(call.message.chat.id, "Введите вопрос, который вы хотите изменить:")
+        bot.register_next_step_handler(call.message, find_question_to_edit, call.message.chat.id)
+
+
+def update_faq(message, question):
+    new_answer = message.text
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("UPDATE faq SET answer = %s WHERE question = %s", (new_answer, question))
+        conn.commit()
+        bot.send_message(message.chat.id, "Ответ успешно обновлен.")
+    except Exception as e:
+        print(e)
+        bot.send_message(message.chat.id, "Произошла ошибка при обновлении ответа.")
+    finally:
+        cur.close()
+        conn.close()
+
+
+def send_confirmation_email(email, code):
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = email
+    msg['Subject'] = 'Код подтверждения регистрации'
+    body = 'Ваш код подтверждения: {}'.format(code)
+    msg.attach(MIMEText(body, 'plain'))
+
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.starttls()
+    server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+    text = msg.as_string()
+    server.sendmail(EMAIL_ADDRESS, email, text)
+    server.quit()
+
+
+@bot.message_handler(commands=['register'])
+def request_email(message):
+    msg = bot.send_message(message.chat.id, "Введите вашу почту (@contractor.gazprom-neft.ru или @gazprom-neft.ru):")
+    bot.register_next_step_handler(msg, process_email_registration, message.from_user.id)
+
+
+def process_email_registration(message, user_id):
+    email = message.text.lower()
+    if re.match(r".+@(contractor\.gazprom-neft\.ru|gazprom-neft\.ru)$", email):
+        confirmation_code = random.randint(100000, 999999)
+        send_confirmation_email(email, confirmation_code)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO registered_users (user_id, email, email_confirmed) VALUES (%s, %s, FALSE) ON CONFLICT (user_id) DO UPDATE SET email = %s, email_confirmed = FALSE",
+                (user_id, email, email))
+            conn.commit()
+            msg = bot.send_message(message.chat.id, "Мы отправили код подтверждения на вашу почту. Введите его здесь:")
+            bot.register_next_step_handler(msg, confirm_email_registration, user_id, confirmation_code)
+        except Exception as e:
+            print(e)
+            bot.send_message(message.chat.id, "Произошла ошибка при регистрации.")
+        finally:
+            cur.close()
+            conn.close()
+    else:
+        bot.send_message(message.chat.id,
+                         "Почта должна быть на домене @contractor.gazprom-neft.ru или @gazprom-neft.ru.")
+
+
+def confirm_email_registration(message, user_id, expected_code):
+    entered_code = message.text
+    if str(expected_code) == entered_code:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("UPDATE registered_users SET email_confirmed = TRUE WHERE user_id = %s", (user_id,))
+            conn.commit()
+            bot.send_message(message.chat.id, "Вы успешно зарегистрированы и подтвердили свою почту.")
+        except Exception as e:
+            print(e)
+            bot.send_message(message.chat.id, "Произошла ошибка при подтверждении почты.")
+        finally:
+            cur.close()
+            conn.close()
+    else:
+        bot.send_message(message.chat.id, "Код подтверждения неверен.")
+
+
+def is_user_registered(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT EXISTS(SELECT 1 FROM registered_users WHERE user_id = %s)", (user_id,))
+        return cur.fetchone()[0]
+    except Exception as e:
+        print(e)
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+@bot.message_handler(commands=['register'])
+def register_user(message):
+    user_id = message.from_user.id
+    if not is_user_registered(user_id):
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("INSERT INTO registered_users (user_id, is_registered) VALUES (%s, TRUE)", (user_id,))
+            conn.commit()
+            bot.send_message(message.chat.id, "Вы успешно зарегистрированы.")
+        except Exception as e:
+            print(e)
+            bot.send_message(message.chat.id, "Произошла ошибка при регистрации.")
+        finally:
+            cur.close()
+            conn.close()
+    else:
+        bot.send_message(message.chat.id, "Вы уже зарегистрированы.")
 
 
 def get_db_connection():
@@ -45,9 +277,8 @@ def find_closest_match(user_question, chat_id):
             bot.send_message(chat_id, answer)
         else:
             messages.append(HumanMessage(content=user_question))
-            res = chat(messages)
+            res = chat.invoke(messages)
             messages.append(res)
-
             bot.send_message(chat_id, res.content)
     except Exception as e:
         print(e)
@@ -62,8 +293,8 @@ def start_message(message):
     bot.send_message(
         message.chat.id,
         "Привет! Я бот для гидродинамиков.\n"
-             "Постараюсь ответить на ваши вопросы!\n"
-             "Используйте команду /train для обучения меня новым вопросам."
+        "Постараюсь ответить на ваши вопросы!\n"
+        "Используйте команду /train для обучения меня новым вопросам."
     )
 
 
@@ -72,8 +303,13 @@ pending_additions = {}
 
 @bot.message_handler(commands=['train'])
 def add_faq_start(message):
-    msg = bot.send_message(message.chat.id, "Введите вопрос:")
-    bot.register_next_step_handler(msg, add_question, message.chat.id)
+    user_id = message.from_user.id
+    if is_user_registered(user_id):
+        msg = bot.send_message(message.chat.id, "Введите вопрос:")
+        bot.register_next_step_handler(msg, add_question, message.chat.id)
+    else:
+        bot.send_message(message.chat.id,
+                         "Для использования этой команды необходимо зарегистрироваться. Используйте команду /register.")
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
